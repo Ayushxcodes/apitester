@@ -1,347 +1,343 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Card } from "@/components/ui/card";
-import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { List, Tag, FileText, ClockCounterClockwise } from '@phosphor-icons/react';
+import { Sun, Moon, Folder, Plus } from '@phosphor-icons/react';
 
 export default function ApiTester() {
   const [url, setUrl] = useState("");
   const [method, setMethod] = useState("GET");
   const [body, setBody] = useState("");
-  const [headers, setHeaders] = useState([{ key: "", value: "" }]);
-  const [useProxy, setUseProxy] = useState(false);
-  const [params, setParams] = useState([{ key: "", value: "" }]);
-  const [response, setResponse] = useState<{
-    status: number;
-    data: any;
-    headers?: Record<string, string>;
-    raw?: string;
-  } | null>(null);
-  const [responseView, setResponseView] = useState<"Pretty" | "Raw">("Pretty");
+  const [headers, setHeaders] = useState<{ key: string; value: string }[]>([{ key: "", value: "" }]);
+  const [params, setParams] = useState<{ key: string; value: string }[]>([{ key: "", value: "" }]);
+  const [response, setResponse] = useState<any>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [activeTab, setActiveTab] = useState("Body");
-  const [history, setHistory] = useState<any[]>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('apiTesterHistory');
-      return saved ? JSON.parse(saved) : [];
-    }
-    return [];
-  });
-
-  useEffect(() => {
-    localStorage.setItem('apiTesterHistory', JSON.stringify(history));
-  }, [history]);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [viewMode, setViewMode] = useState<"formatted" | "raw">("formatted");
+  const [selectedCollection, setSelectedCollection] = useState<number | null>(0);
 
   const sendRequest = async () => {
-    setError("");
     setLoading(true);
     setResponse(null);
     try {
-      // build URL with params
-      const queryPairs = params.filter((p) => p.key).map((p) => `${encodeURIComponent(p.key)}=${encodeURIComponent(p.value)}`);
-      const fullUrl = queryPairs.length ? `${url}${url.includes("?") ? "&" : "?"}${queryPairs.join("&")}` : url;
-      // convert headers array to object
+      // convert headers to object
       const headersObj: Record<string, string> = {};
       headers.forEach((h) => {
         if (h.key) headersObj[h.key] = h.value;
       });
 
-      const fetchOptions: any = {
-        method,
-        headers: headersObj,
-      };
-
-      if (method !== "GET" && body) {
-        // Set content-type if not provided by user
-        if (!Object.keys(headersObj).some((k) => k.toLowerCase() === "content-type")) {
-          fetchOptions.headers["Content-Type"] = "application/json";
-        }
-        fetchOptions.body = body;
+      // build URL with params
+      let fullUrl = url;
+      const paramsObj = new URLSearchParams();
+      params.forEach((p) => {
+        if (p.key) paramsObj.append(p.key, p.value);
+      });
+      if (paramsObj.toString()) {
+        fullUrl += (url.includes('?') ? '&' : '?') + paramsObj.toString();
       }
 
-      let res: Response;
-      if (useProxy) {
-        // call local Next.js proxy route which forwards the request
-        res = await fetch("/api/proxy", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url: fullUrl, method, headers: fetchOptions.headers, body: fetchOptions.body }),
-        });
-        const text = await res.text();
-        let parsed = text;
-        try {
-          parsed = JSON.parse(text);
-        } catch (e) {
-          // keep as text
-        }
-        setResponse({ status: res.status, data: parsed, raw: text });
-      } else {
-        res = await fetch(fullUrl, fetchOptions);
-        const text = await res.text();
-        let parsed: any = text;
-        try {
-          parsed = JSON.parse(text);
-        } catch (e) {
-          // keep as text
-        }
-        const responseHeaders: Record<string, string> = {};
-        res.headers.forEach((v, k) => (responseHeaders[k] = v));
-        setResponse({ status: res.status, data: parsed, headers: responseHeaders, raw: text });
+      const startTime = Date.now();
+
+      const opts: any = { method, headers: headersObj };
+      if (method !== "GET" && body) opts.body = body;
+
+      const res = await fetch(fullUrl, opts);
+      const text = await res.text();
+      const duration = Date.now() - startTime;
+      let data: any = text;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        // keep text
       }
+
+      const responseHeaders: Record<string, string> = {};
+      res.headers.forEach((v, k) => (responseHeaders[k] = v));
+
+      setResponse({ status: res.status, data, headers: responseHeaders, time: duration, size: text.length });
     } catch (err: any) {
-      setError(err?.message || "Request failed");
+      setResponse({ error: err?.message || "Request failed" });
     } finally {
       setLoading(false);
     }
   };
 
-  const saveToHistory = () => {
-    const request = { url, method, body, headers, params, useProxy };
-    setHistory((prev) => [request, ...prev.slice(0, 9)]); // keep last 10
-  };
-
-  const loadFromHistory = (req: any) => {
-    setUrl(req.url);
-    setMethod(req.method);
-    setBody(req.body);
-    setHeaders(req.headers);
-    setParams(req.params);
-    setUseProxy(req.useProxy);
-  };
-
   return (
-    <div className="p-6">
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <div className="col-span-1 lg:col-span-7 space-y-4">
-          <Card className="p-4">
-            <div className="flex items-center gap-3">
-              <Select onValueChange={(v) => setMethod(v ?? "GET")} defaultValue={method}>
-                <SelectTrigger className="w-28">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="GET">
-                    <span className="flex items-center gap-2">
-                      <span className="text-green-500">GET</span>
-                    </span>
-                  </SelectItem>
-                  <SelectItem value="POST">
-                    <span className="flex items-center gap-2">
-                      <span className="text-blue-500">POST</span>
-                    </span>
-                  </SelectItem>
-                  <SelectItem value="PUT">
-                    <span className="flex items-center gap-2">
-                      <span className="text-orange-500">PUT</span>
-                    </span>
-                  </SelectItem>
-                  <SelectItem value="DELETE">
-                    <span className="flex items-center gap-2">
-                      <span className="text-red-500">DELETE</span>
-                    </span>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-
-              <Input
-                placeholder="https://api.example.com"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                className="flex-1"
-              />
-
-              <Button onClick={sendRequest} disabled={loading || !url.trim()}>
-                {loading ? (
-                  <span className="flex items-center gap-2">
-                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-                    </svg>
-                    Sending...
-                  </span>
-                ) : (
-                  "Send"
-                )}
-              </Button>
-
-              <Button onClick={() => { const req = { url, method, body, headers, params }; setHistory(prev => [req, ...prev]); }}>Save</Button>
-            </div>
-          </Card>
-
-          <Card className="p-4">
-            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v ?? "Body")}>
-              <TabsList>
-                <TabsTrigger value="Params">
-                  <List size={16} className="mr-2" />
-                  Params
-                </TabsTrigger>
-                <TabsTrigger value="Headers">
-                  <Tag size={16} className="mr-2" />
-                  Headers
-                </TabsTrigger>
-                <TabsTrigger value="Body">
-                  <FileText size={16} className="mr-2" />
-                  Body
-                </TabsTrigger>
-                <TabsTrigger value="History">
-                  <ClockCounterClockwise size={16} className="mr-2" />
-                  History
-                </TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="Params">
-                <div className="space-y-2">
-                  {params.map((p, idx) => (
-                    <div key={idx} className="flex gap-2">
-                      <Input
-                        placeholder="Param name"
-                        value={p.key}
-                        onChange={(e) => {
-                          const next = [...params];
-                          next[idx] = { ...next[idx], key: e.target.value };
-                          setParams(next);
-                        }}
-                        className="w-1/2"
-                      />
-                      <Input
-                        placeholder="Param value"
-                        value={p.value}
-                        onChange={(e) => {
-                          const next = [...params];
-                          next[idx] = { ...next[idx], value: e.target.value };
-                          setParams(next);
-                        }}
-                        className="flex-1"
-                      />
-                      <Button onClick={() => setParams((s) => s.filter((_, i) => i !== idx))}>Remove</Button>
-                    </div>
-                  ))}
-                  <div className="flex gap-2">
-                    <Button onClick={() => setParams((s) => [...s, { key: "", value: "" }])}>Add Param</Button>
-                  </div>
-                </div>
-              </TabsContent>
-
-              <TabsContent value="Headers">
-                <div className="space-y-2">
-                  {headers.map((h, idx) => (
-                    <div key={idx} className="flex gap-2">
-                      <Input
-                        placeholder="Header name"
-                        value={h.key}
-                        onChange={(e) => {
-                          const next = [...headers];
-                          next[idx] = { ...next[idx], key: e.target.value };
-                          setHeaders(next);
-                        }}
-                        className="w-1/2"
-                      />
-                      <Input
-                        placeholder="Header value"
-                        value={h.value}
-                        onChange={(e) => {
-                          const next = [...headers];
-                          next[idx] = { ...next[idx], value: e.target.value };
-                          setHeaders(next);
-                        }}
-                        className="flex-1"
-                      />
-                      <Button onClick={() => setHeaders((s) => s.filter((_, i) => i !== idx))}>Remove</Button>
-                    </div>
-                  ))}
-
-                  <div className="flex items-center gap-4">
-                    <Button onClick={() => setHeaders((s) => [...s, { key: "", value: "" }])}>Add Header</Button>
-                    <label className="flex items-center gap-2 text-sm">
-                      <input type="checkbox" checked={useProxy} onChange={(e) => setUseProxy(e.target.checked)} />
-                      <span>Use proxy</span>
-                    </label>
-                  </div>
-                </div>
-              </TabsContent>
-
-              <TabsContent value="Body">
-                <Textarea
-                  placeholder='{"key": "value"}'
-                  value={body}
-                  onChange={(e) => setBody(e.target.value)}
-                  className="min-h-[160px]"
-                />
-              </TabsContent>
-
-              <TabsContent value="History">
-                <div className="space-y-2">
-                  <Button onClick={saveToHistory}>Save Current Request</Button>
-                  {history.map((req, idx) => (
-                    <div key={idx} className="flex items-center justify-between p-2 border rounded">
-                      <span className="text-sm">{req.method} {req.url}</span>
-                      <Button onClick={() => loadFromHistory(req)}>Load</Button>
-                    </div>
-                  ))}
-                </div>
-              </TabsContent>
-            </Tabs>
-          </Card>
+    <div className={`flex h-screen ${theme === "dark" ? "bg-gray-900 text-white" : "bg-white text-black"}`}>
+      {/* Sidebar */}
+      <div className={`w-64 border-r p-4 ${theme === "dark" ? "border-gray-700 bg-gray-800" : "border-gray-200 bg-gray-50"}`}>
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="font-bold text-lg">Collections</h2>
+            <p className="text-sm text-muted-foreground mt-1">Organize saved requests</p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              // placeholder: add new collection logic
+              setSelectedCollection(null);
+            }}
+            className="flex items-center gap-2"
+          >
+            <Plus size={14} /> New
+          </Button>
         </div>
 
-        <div className="col-span-1 lg:col-span-5">
-          <Card className="p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <h3 className="text-lg font-semibold">Response</h3>
-                <span className="text-sm text-muted-foreground">{response ? `${response.status}` : "-"}</span>
-              </div>
+        <div className="mt-3">
+          <Input placeholder="Search collections..." className="w-full" />
+        </div>
 
-              <div className="flex items-center gap-2">
-                <Button onClick={() => { setResponse(null); setError(""); }}>Clear</Button>
-                <Button onClick={() => { if (response) navigator.clipboard?.writeText(responseView === "Pretty" ? JSON.stringify(response.data, null, 2) : (response.raw || "")); }} disabled={!response}>Copy</Button>
-              </div>
-            </div>
+        <ul className="mt-4 space-y-2">
+          {["GET /users", "POST /login"].map((label, idx) => (
+            <li
+              key={idx}
+              onClick={() => setSelectedCollection(idx)}
+              className={`flex items-center gap-2 p-2 rounded cursor-pointer transition-colors duration-100 ${
+                selectedCollection === idx
+                  ? theme === "dark"
+                    ? "bg-gray-700"
+                    : "bg-gray-200"
+                  : theme === "dark"
+                  ? "hover:bg-gray-700"
+                  : "hover:bg-gray-100"
+              }`}
+            >
+              <Folder size={16} />
+              {label}
+            </li>
+          ))}
+        </ul>
+      </div>
 
-            <div className="mt-4 space-y-4">
-              <div>
-                <div className="text-sm font-medium mb-1">Headers</div>
-                <pre className="text-xs bg-gray-50 p-2 rounded overflow-auto max-h-36">{response?.headers ? JSON.stringify(response.headers, null, 2) : "-"}</pre>
-              </div>
+      {/* Main */}
+      <div className="flex-1 flex flex-col">
+        {/* Top Bar */}
+        <div className={`flex gap-2 p-4 border-b items-center ${theme === "dark" ? "bg-gray-800 border-gray-700" : "bg-white border-gray-200"}`}>
+          <select
+            className="border rounded px-2 h-10"
+            value={method}
+            onChange={(e) => setMethod(e.target.value)}
+          >
+            <option>GET</option>
+            <option>POST</option>
+            <option>PUT</option>
+            <option>DELETE</option>
+          </select>
 
-              <div>
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-medium">Body</div>
-                  <div>
-                    <Button onClick={() => setResponseView("Pretty")} variant={responseView === "Pretty" ? "default" : "outline"}>Pretty</Button>
-                    <Button onClick={() => setResponseView("Raw")} variant={responseView === "Raw" ? "default" : "outline"}>Raw</Button>
+          <Input
+            placeholder="https://api.example.com"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            className="flex-1"
+          />
+
+          <span
+            className={`px-2 py-1 rounded text-sm font-semibold mr-2 ${
+              method === "GET"
+                ? "bg-green-100 text-green-800"
+                : method === "POST"
+                ? "bg-blue-100 text-blue-800"
+                : method === "PUT"
+                ? "bg-amber-100 text-amber-800"
+                : "bg-red-100 text-red-800"
+            }`}
+          >
+            {method}
+          </span>
+
+          <Button onClick={sendRequest} disabled={loading || !url.trim()}>
+            {loading ? "Sending..." : "Send"}
+          </Button>
+
+          <div className="ml-2">
+            <Badge variant="secondary">{response?.status ?? "-"}</Badge>
+          </div>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setTheme(theme === "light" ? "dark" : "light")}
+            className="ml-2"
+          >
+            {theme === "light" ? <Moon size={16} /> : <Sun size={16} />}
+          </Button>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex-1 flex flex-col">
+          <Tabs defaultValue="body" className="flex-1 flex flex-col">
+            <TabsList className="px-4">
+              <TabsTrigger value="params">Params</TabsTrigger>
+              <TabsTrigger value="headers">Headers</TabsTrigger>
+              <TabsTrigger value="body">Body</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="params" className="p-4 flex-1 overflow-auto">
+              <div className="space-y-2">
+                {params.map((param, index) => (
+                  <div key={index} className="flex gap-2 items-center">
+                    <Input
+                      placeholder="Key"
+                      value={param.key}
+                      onChange={(e) => {
+                        const newParams = [...params];
+                        newParams[index].key = e.target.value;
+                        setParams(newParams);
+                      }}
+                      className="flex-1"
+                    />
+                    <Input
+                      placeholder="Value"
+                      value={param.value}
+                      onChange={(e) => {
+                        const newParams = [...params];
+                        newParams[index].value = e.target.value;
+                        setParams(newParams);
+                      }}
+                      className="flex-1"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const newParams = params.filter((_, i) => i !== index);
+                        setParams(newParams.length ? newParams : [{ key: "", value: "" }]);
+                      }}
+                    >
+                      Remove
+                    </Button>
                   </div>
-                </div>
-                <div className="mt-2 bg-black text-green-200 p-3 rounded overflow-auto max-h-80">
-                  {response ? (
-                    responseView === "Pretty" ? (
-                      <SyntaxHighlighter language="json" style={oneDark} customStyle={{ margin: 0, padding: 0, background: 'transparent', fontSize: '14px' }}>
-                        {JSON.stringify(response.data, null, 2)}
-                      </SyntaxHighlighter>
-                    ) : (
-                      <pre className="text-sm">{response.raw}</pre>
-                    )
-                  ) : (
-                    <pre className="text-sm">Response will appear here</pre>
-                  )}
+                ))}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setParams([...params, { key: "", value: "" }])}
+                >
+                  Add Param
+                </Button>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="headers" className="p-4 flex-1 overflow-auto">
+              <div className="space-y-2">
+                {headers.map((h, i) => (
+                  <div key={i} className="flex gap-2 mb-2">
+                    <Input
+                      placeholder="Key"
+                      value={h.key}
+                      onChange={(e) => {
+                        const next = [...headers];
+                        next[i] = { ...next[i], key: e.target.value };
+                        setHeaders(next);
+                      }}
+                    />
+                    <Input
+                      placeholder="Value"
+                      value={h.value}
+                      onChange={(e) => {
+                        const next = [...headers];
+                        next[i] = { ...next[i], value: e.target.value };
+                        setHeaders(next);
+                      }}
+                    />
+                    <Button onClick={() => setHeaders((s) => s.filter((_, idx) => idx !== i))}>Remove</Button>
+                  </div>
+                ))}
+
+                <div>
+                  <Button onClick={() => setHeaders((s) => [...s, { key: "", value: "" }])}>Add Header</Button>
                 </div>
               </div>
+            </TabsContent>
+
+            <TabsContent value="body" className="p-4 flex-1">
+              <Textarea placeholder="JSON body..." value={body} onChange={(e) => setBody(e.target.value)} />
+            </TabsContent>
+          </Tabs>
+        </div>
+
+        {/* Response Panel */}
+        <div className="h-1/2 border-t p-4 overflow-auto rounded-t-xl bg-gray-500 text-slate-100">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="text-sm">Status</div>
+              <div
+                className={`px-2 py-1 rounded font-semibold text-sm ${
+                  response?.status >= 200 && response?.status < 300
+                    ? "bg-emerald-100 text-emerald-800"
+                    : response?.status >= 400 && response?.status < 500
+                    ? "bg-rose-100 text-rose-800"
+                    : "bg-amber-100 text-amber-800"
+                }`}
+              >
+                {response?.status ?? "-"}
+              </div>
+
+              {response?.time && <div className="text-xs text-slate-400">{response.time}ms</div>}
+              {response?.size && <div className="text-xs text-slate-400">{response.size} bytes</div>}
             </div>
-          </Card>
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  if (response) navigator.clipboard?.writeText(JSON.stringify(response.data, null, 2));
+                }}
+                disabled={!response}
+              >
+                Copy
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setResponse(null)}
+              >
+                Clear
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setViewMode(viewMode === "formatted" ? "raw" : "formatted")}
+              >
+                {viewMode === "formatted" ? "Raw" : "Formatted"}
+              </Button>
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-4">
+            <div>
+              <div className="text-sm font-medium text-slate-300">Headers</div>
+              <pre className="mt-2 text-xs bg-slate-800 p-2 rounded max-h-32 overflow-auto">{response?.headers ? JSON.stringify(response.headers, null, 2) : "-"}</pre>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-medium text-slate-300">Body</div>
+              </div>
+              <div className="mt-2">
+                {response ? (
+                  viewMode === "formatted" ? (
+                    <SyntaxHighlighter language="json" style={oneDark} className="text-sm rounded max-h-64 overflow-auto">
+                      {JSON.stringify(response.data, null, 2)}
+                    </SyntaxHighlighter>
+                  ) : (
+                    <pre className="text-sm bg-slate-800 p-3 rounded max-h-64 overflow-auto text-slate-100">
+                      {typeof response.data === "string" ? response.data : JSON.stringify(response.data, null, 2)}
+                    </pre>
+                  )
+                ) : (
+                  <div className="text-sm text-slate-400">Response will appear here</div>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
